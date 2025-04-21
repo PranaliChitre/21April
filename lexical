@@ -1,0 +1,53 @@
+import re
+
+MAX_KEYWORDS = 10
+keywords = ["int", "float", "char", "double", "if", "else", "while", "for", "return", "void"]
+
+def is_keyword(word):
+    return word in keywords
+
+def analyze_lexemes(source):
+    i = 0
+    length = len(source)
+
+    while i < length:
+        if source[i].isspace():
+            i += 1
+            continue
+
+        if source[i].isalpha():
+            start = i
+            while i < length and (source[i].isalnum() or source[i] == '_'):
+                i += 1
+            token = source[start:i]
+            if is_keyword(token):
+                print(f"Keyword: {token}")
+            else:
+                print(f"Identifier: {token}")
+
+        elif source[i].isdigit():
+            start = i
+            while i < length and source[i].isdigit():
+                i += 1
+            token = source[start:i]
+            print(f"Number: {token}")
+
+        elif source[i] in "+-*/=<>!&|":
+            op = source[i]
+            if i + 1 < length:
+                if (source[i + 1] == '=' or 
+                    (source[i] == '&' and source[i + 1] == '&') or 
+                    (source[i] == '|' and source[i + 1] == '|')):
+                    op += source[i + 1]
+                    i += 1
+            print(f"Operator: {op}")
+            i += 1
+
+        else:
+            print(f"Symbol: {source[i]}")
+            i += 1
+
+if __name__ == "__main__":
+    source_code = input("Enter source code snippet: ")
+    print("\nLexical Analysis:")
+    analyze_lexemes(source_code)
