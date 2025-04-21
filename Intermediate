@@ -1,0 +1,57 @@
+import re
+
+class IntermediateCodeGenerator:
+    def __init__(self):
+        self.temp_counter = 1
+        self.instructions = []
+
+    def get_temp(self):
+        temp_var = f"T{self.temp_counter}"
+        self.temp_counter += 1
+        return temp_var
+
+    def generate_code(self, expr):
+        tokens = re.split(r'(\+|\-|\*|\/|\(|\))', expr)
+        tokens = [token.strip() for token in tokens if token.strip()]
+
+        operand_stack = []
+        operator_stack = []
+
+        for token in tokens:
+            if token.isalnum():
+                operand_stack.append(token)
+            elif token in ('+', '-', '*', '/'):
+                while operator_stack and self.precedence(operator_stack[-1]) >= self.precedence(token):
+                    self.handle_operator(operator_stack.pop(), operand_stack)
+                operator_stack.append(token)
+            elif token == ')':
+                while operator_stack[-1] != '(':
+                    self.handle_operator(operator_stack.pop(), operand_stack)
+                operator_stack.pop()
+
+        while operator_stack:
+            self.handle_operator(operator_stack.pop(), operand_stack)
+
+        return self.instructions
+
+    def handle_operator(self, operator, operand_stack):
+        right_operand = operand_stack.pop()
+        left_operand = operand_stack.pop()
+        temp_var = self.get_temp()
+        self.instructions.append(f"{temp_var} = {left_operand} {operator} {right_operand}")
+        operand_stack.append(temp_var)
+
+    def precedence(self, operator):
+        if operator in ('+', '-'):
+            return 1
+        if operator in ('*', '/'):
+            return 2
+        return 0
+
+if __name__ == "__main__":
+    code_gen = IntermediateCodeGenerator()
+    expression = "a+c*d+z"
+    intermediate_code = code_gen.generate_code(expression)
+
+    for instruction in intermediate_code:
+        print(instruction)
