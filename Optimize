@@ -1,0 +1,480 @@
+class CodeOptimizer:
+    """
+    A compiler optimization tool that performs various optimizations on intermediate code.
+    Each optimization is implemented as a separate method for modularity and clarity.
+    """
+
+    def __init__(self, intermediate_code):
+        """
+        Initialize the optimizer with intermediate code.
+        
+        Args:
+            intermediate_code: List of tuples representing instructions
+        """
+        self.code = intermediate_code.copy()  # Create a copy to avoid modifying the original
+        self.instruction_count = 0  # Track unique temp variables
+        self.variable_uses = {}  # Track variable usage
+        self.variable_defs = {}  # Track variable definitions
+        self._analyze_code()
+    
+    def _analyze_code(self):
+        """Analyze the code to gather information about variable usage."""
+        for i, instr in enumerate(self.code):
+            if not isinstance(instr, tuple):
+                continue
+                
+            # Record definition (where variable is assigned)
+            if len(instr) >= 1:
+                var = instr[0]
+                if var not in self.variable_defs:
+                    self.variable_defs[var] = []
+                self.variable_defs[var].append(i)
+            
+            # Record uses (where variable is used as operand)
+            if len(instr) >= 3:
+                for j in range(2, len(instr)):
+                    if isinstance(instr[j], str) and instr[j] not in ["=", "+", "-", "*", "/"]:
+                        if instr[j] not in self.variable_uses:
+                            self.variable_uses[instr[j]] = []
+                        self.variable_uses[instr[j]].append(i)
+
+    def _create_temp_var(self):
+        """Create a unique temporary variable name."""
+        temp = f"t{self.instruction_count}"
+        self.instruction_count += 1
+        return temp
+
+    def peephole_optimization(self):
+        """
+        Apply peephole optimizations - small, localized code improvements.
+        Examples: x + 0 -> x, x * 1 -> x
+        """
+        optimized_code = []
+        
+        for instr in self.code:
+            if not isinstance(instr, tuple) or len(instr) < 3:
+                optimized_code.append(instr)
+                continue
+                
+            # Convert 4-tuple to canonical form
+            if len(instr) == 4:
+                var, op, op1, op2 = instr
+                
+                # x + 0 = x or 0 + x = x
+                if op == "+" and (op1 == 0 or op2 == 0):
+                    non_zero = op2 if op1 == 0 else op1
+                    optimized_code.append((var, "=", non_zero))
+                # x * 1 = x or 1 * x = x
+                elif op == "*" and (op1 == 1 or op2 == 1):
+                    non_one = op2 if op1 == 1 else op1
+                    optimized_code.append((var, "=", non_one))
+                # x * 0 = 0 or 0 * x = 0
+                elif op == "*" and (op1 == 0 or op2 == 0):
+                    optimized_code.append((var, "=", 0))
+                # x - 0 = x
+                elif op == "-" and op2 == 0:
+                    optimized_code.append((var, "=", op1))
+                # x / 1 = x
+                elif op == "/" and op2 == 1:
+                    optimized_code.append((var, "=", op1))
+                else:
+                    optimized_code.append(instr)
+            # Handle 3-tuple (var, op, operand)
+            elif len(instr) == 3:
+                var, op, operand = instr
+                
+                # Convert a = a to nothing (self-assignment elimination)
+                if op == "=" and var == operand:
+                    continue
+                else:
+                    optimized_code.append(instr)
+            else:
+                optimized_code.append(instr)
+                
+        self.code = optimized_code
+        return self.code
+
+    def constant_folding(self):
+        """
+        Evaluate constant expressions at compile time.
+        Example: x = 2 + 3 becomes x = 5
+        """
+        optimized_code = []
+        
+        for instr in self.code:
+            if not isinstance(instr, tuple):
+                optimized_code.append(instr)
+                continue
+                
+            # Handle 4-tuple format: (var, op, operand1, operand2)
+            if len(instr) == 4:
+                var, op, op1, op2 = instr
+                
+                # Check if both operands are constants
+                if isinstance(op1, (int, float)) and isinstance(op2, (int, float)):
+                    try:
+                        result = None
+                        if op == "+":
+                            result = op1 + op2
+                        elif op == "-":
+                            result = op1 - op2
+                        elif op == "*":
+                            result = op1 * op2
+                        elif op == "/" and op2 != 0:
+                            result = op1 / op2
+                            # Convert to int if it's a whole number
+                            if result == int(result):
+                                result = int(result)
+                        
+                        if result is not None:
+                            optimized_code.append((var, "=", result))
+                        else:
+                            optimized_code.append(instr)
+                    except Exception:
+                        # If any error occurs during evaluation, keep original instruction
+                        optimized_code.append(instr)
+                else:
+                    optimized_code.append(instr)
+            else:
+                optimized_code.append(instr)
+                
+        self.code = optimized_code
+        return self.code
+
+    def copy_propagation(self):
+        """
+        Replace variables with their values when they're simple copies.
+        Example: a = b; c = a + d becomes a = b; c = b + d
+        """
+        # Track variable values
+        var_values = {}
+        optimized_code = []
+        
+        for instr in self.code:
+            if not isinstance(instr, tuple):
+                optimized_code.append(instr)
+                continue
+                
+            # Check for simple assignment: var = value
+            if len(instr) == 3 and instr[1] == "=":
+                var, _, value = instr
+                
+                # If value is a variable that has a known value, propagate it
+                if isinstance(value, str) and value in var_values:
+                    optimized_code.append((var, "=", var_values[value]))
+                    var_values[var] = var_values[value]
+                else:
+                    optimized_code.append(instr)
+                    # Record this as a simple assignment if value is a constant or another variable
+                    if isinstance(value, (int, float, str)):
+                        var_values[var] = value
+            
+            # Handle operations with operands (4-tuple)
+            elif len(instr) == 4:
+                var, op, op1, op2 = instr
+                
+                # Replace operands with their known values
+                new_op1 = var_values.get(op1, op1) if isinstance(op1, str) else op1
+                new_op2 = var_values.get(op2, op2) if isinstance(op2, str) else op2
+                
+                optimized_code.append((var, op, new_op1, new_op2))
+            else:
+                optimized_code.append(instr)
+                
+        self.code = optimized_code
+        return self.code
+
+    def strength_reduction(self):
+        """
+        Replace expensive operations with equivalent cheaper ones.
+        Example: x * 2 -> x + x
+        """
+        optimized_code = []
+        
+        for instr in self.code:
+            if not isinstance(instr, tuple) or len(instr) != 4:
+                optimized_code.append(instr)
+                continue
+                
+            var, op, op1, op2 = instr
+            
+            # Multiplication by power of 2
+            if op == "*" and isinstance(op2, int) and op2 > 0 and (op2 & (op2 - 1) == 0):
+                # Replace with left shift: x * 2^n -> x << n
+                shift_amount = 0
+                temp = op2
+                while temp > 1:
+                    temp >>= 1
+                    shift_amount += 1
+                optimized_code.append((var, "<<", op1, shift_amount))
+            
+            # Multiplication by 2
+            elif op == "*" and op2 == 2:
+                # Replace with addition: x * 2 -> x + x
+                optimized_code.append((var, "+", op1, op1))
+            
+            # Division by power of 2
+            elif op == "/" and isinstance(op2, int) and op2 > 0 and (op2 & (op2 - 1) == 0):
+                # Replace with right shift: x / 2^n -> x >> n
+                shift_amount = 0
+                temp = op2
+                while temp > 1:
+                    temp >>= 1
+                    shift_amount += 1
+                optimized_code.append((var, ">>", op1, shift_amount))
+            else:
+                optimized_code.append(instr)
+                
+        self.code = optimized_code
+        return self.code
+
+    def common_subexpression_elimination(self):
+        """
+        Identify and eliminate repeated calculations.
+        Example: a = b + c; d = b + c becomes a = b + c; d = a
+        """
+        expr_to_var = {}  # Maps expressions to variables containing their results
+        optimized_code = []
+        
+        for instr in self.code:
+            if not isinstance(instr, tuple) or len(instr) != 4:
+                optimized_code.append(instr)
+                continue
+                
+            var, op, op1, op2 = instr
+            
+            # Create a key for this expression
+            expr_key = (op, op1, op2)
+            
+            # Check if we've computed this expression before
+            if expr_key in expr_to_var:
+                # Reuse the previous result
+                result_var = expr_to_var[expr_key]
+                optimized_code.append((var, "=", result_var))
+            else:
+                # First time seeing this expression
+                optimized_code.append(instr)
+                expr_to_var[expr_key] = var
+                
+        self.code = optimized_code
+        return self.code
+
+    def dead_code_elimination(self):
+        """
+        Remove code that doesn't affect the program output.
+        Identifies variables that are defined but never used.
+        """
+        # Re-analyze variable usage after previous optimizations
+        self.variable_uses = {}
+        self.variable_defs = {}
+        self._analyze_code()
+        
+        # Find live variables (those that are used after being defined)
+        live_vars = set()
+        for var, uses in self.variable_uses.items():
+            if uses:  # If the variable is used at least once
+                live_vars.add(var)
+        
+        # Also consider variables that might be program outputs
+        # Assuming variables at the end or assigned just before exit points are outputs
+        for i, instr in enumerate(self.code):
+            if isinstance(instr, tuple) and len(instr) >= 1:
+                # If this is an exit instruction or the last few instructions
+                if i >= len(self.code) - 3 or (len(instr) > 1 and instr[0] == "exit"):
+                    # Mark variables assigned right before as live
+                    for j in range(max(0, i-3), i):
+                        if j < len(self.code) and isinstance(self.code[j], tuple):
+                            live_vars.add(self.code[j][0])
+        
+        # Keep only instructions that affect live variables or control flow
+        optimized_code = []
+        for instr in self.code:
+            if not isinstance(instr, tuple):
+                optimized_code.append(instr)
+                continue
+                
+            # Keep control flow instructions
+            if instr[0] == "exit" or (len(instr) > 1 and instr[1] in ["if", "goto", "label"]):
+                optimized_code.append(instr)
+                continue
+                
+            # Keep instructions that define live variables
+            if instr[0] in live_vars:
+                optimized_code.append(instr)
+                continue
+                
+            # For other instructions, check if they might have side effects
+            # (This is a simplified approach - a real compiler would do more analysis)
+            if len(instr) > 1 and instr[1] in ["call", "return"]:
+                optimized_code.append(instr)
+                
+        self.code = optimized_code
+        return self.code
+
+    def loop_invariant_code_motion(self):
+        """
+        Move code that doesn't change inside loops to outside the loop.
+        Simple version - identifies basic invariant expressions.
+        """
+        # This is a simplified implementation for demo purposes
+        # A real implementation would require control flow graph analysis
+        
+        # Find loop structures (very simplified approach)
+        loop_starts = []
+        loop_ends = []
+        
+        for i, instr in enumerate(self.code):
+            if isinstance(instr, tuple) and len(instr) > 1:
+                if instr[1] == "for" or instr[1] == "while":
+                    loop_starts.append(i)
+                elif instr[1] == "endloop":
+                    loop_ends.append(i)
+        
+        # Ensure we have matching loop starts and ends
+        if len(loop_starts) != len(loop_ends) or not loop_starts:
+            return self.code
+            
+        # Sort loops by nesting level (outermost first)
+        loops = sorted(zip(loop_starts, loop_ends))
+        
+        # Process each loop
+        optimized_code = self.code.copy()
+        for loop_start, loop_end in loops:
+            # Identify invariant expressions within this loop
+            invariants = []
+            for i in range(loop_start + 1, loop_end):
+                instr = optimized_code[i]
+                if isinstance(instr, tuple) and len(instr) == 4:
+                    var, op, op1, op2 = instr
+                    
+                    # Check if operands are loop invariant (very simplified)
+                    # In a real implementation, we'd check if they're not modified in the loop
+                    if (isinstance(op1, (int, float)) or (isinstance(op1, str) and op1.startswith("const_"))) and \
+                       (isinstance(op2, (int, float)) or (isinstance(op2, str) and op2.startswith("const_"))):
+                        invariants.append((i, instr))
+            
+            # Hoist invariants out of the loop
+            for idx, instr in reversed(invariants):
+                # Remove from loop
+                optimized_code.pop(idx)
+                # Insert before loop
+                optimized_code.insert(loop_start, instr)
+                
+        self.code = optimized_code
+        return self.code
+
+    def eliminate_redundant_instructions(self):
+        """
+        Remove redundant assignments and instructions.
+        Example: a = 5; a = 6 becomes a = 6
+        """
+        # Track the last definition of each variable
+        last_def = {}
+        to_remove = set()
+        
+        # First pass: mark redundant assignments
+        for i, instr in enumerate(self.code):
+            if not isinstance(instr, tuple) or len(instr) < 2:
+                continue
+                
+            var = instr[0]
+            
+            # Check for direct assignment
+            if len(instr) == 3 and instr[1] == "=":
+                if var in last_def:
+                    # This is a redundant assignment if the variable is redefined
+                    # before being used
+                    if var not in self.variable_uses or all(use > i for use in self.variable_uses.get(var, [])):
+                        to_remove.add(last_def[var])
+                last_def[var] = i
+        
+        # Second pass: remove marked instructions
+        optimized_code = [instr for i, instr in enumerate(self.code) if i not in to_remove]
+        self.code = optimized_code
+        return self.code
+
+    def optimize(self):
+        """Apply all optimizations in an effective order."""
+        # First level: Basic simplifications
+        self.constant_folding()
+        self.peephole_optimization()
+        
+        # Second level: Data flow optimizations
+        self.copy_propagation()
+        self.common_subexpression_elimination()
+        self.strength_reduction()
+        
+        # Third level: Control flow optimizations
+        self.loop_invariant_code_motion()
+        self.eliminate_redundant_instructions()
+        self.dead_code_elimination()
+        
+        # Final pass to catch any new opportunities
+        self.constant_folding()
+        self.peephole_optimization()
+        
+        return self.code
+    
+    def optimize_with_stats(self):
+        """Run optimization and return statistics."""
+        original_count = len(self.code)
+        original_code = self.code.copy()
+        
+        start_time = time.time()
+        optimized_code = self.optimize()
+        end_time = time.time()
+        
+        stats = {
+            "original_instruction_count": original_count,
+            "optimized_instruction_count": len(optimized_code),
+            "reduction_percentage": ((original_count - len(optimized_code)) / original_count) * 100 if original_count > 0 else 0,
+            "optimization_time_ms": (end_time - start_time) * 1000,
+            "original_code": original_code,
+            "optimized_code": optimized_code
+        }
+        
+        return optimized_code, stats
+    
+    def __str__(self):
+        """String representation of the current code."""
+        result = "Intermediate Code:\n"
+        for i, instr in enumerate(self.code):
+            result += f"{i}: {instr}\n"
+        return result
+
+
+# Example usage with improved intermediate code
+import time
+
+# More realistic intermediate code example
+intermediate_code = [
+    ('t1', '+', 5, 3),          # t1 = 5 + 3
+    ('t2', '+', 10, 4),         # t2 = 10 + 4
+    ('t3', '+', 't1', 't2'),    # t3 = t1 + t2
+    ('t4', '*', 't3', 2),       # t4 = t3 * 2
+    ('t5', '*', 8, 4),          # t5 = 8 * 4
+    ('t6', '+', 't1', 't2'),    # t6 = t1 + t2 (Common subexpression)
+    ('x', '=', 10),             # x = 10
+    ('y', '=', 'x'),            # y = x (Copy propagation)
+    ('z', '=', 'y'),            # z = y (Copy propagation)
+    ('a', '+', 'z', 0),         # a = z + 0 (Peephole)
+    ('t7', '*', 't3', 0),       # t7 = t3 * 0 (Strength reduction)
+    ('t8', '=', 't7'),          # t8 = t7 (Redundant if t7 is unused)
+    ('exit', 'if', 'false'),    # Unreachable code
+    ('t9', '+', 1, 2)           # t9 = 1 + 2 (Dead code)
+]
+
+# Create optimizer and run optimizations with statistics
+optimizer = CodeOptimizer(intermediate_code)
+optimized_code, stats = optimizer.optimize_with_stats()
+
+print(f"Original code ({stats['original_instruction_count']} instructions):")
+for i, instr in enumerate(stats['original_code']):
+    print(f"{i}: {instr}")
+
+print(f"\nOptimized code ({stats['optimized_instruction_count']} instructions):")
+for i, instr in enumerate(optimized_code):
+    print(f"{i}: {instr}")
+
+print(f"\nReduction: {stats['reduction_percentage']:.2f}%")
+print(f"Optimization time: {stats['optimization_time_ms']:.2f} ms")
